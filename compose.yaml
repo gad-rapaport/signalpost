@@ -1,0 +1,108 @@
+# Signalpost demo stack (production build, Slim defaults).
+#   docker compose up -d --build --wait
+#   docker compose --profile tools run --rm seed
+# See docs/SETUP.md and docs/SLIM.md.
+name: signalpost
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 5m
+    max-file: '2'
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+  logging: *logging
+
+services:
+  app:
+    <<: *hardening
+    build: .
+    image: signalpost:${IMAGE_TAG:-local}
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      LOGIN_RATE_LIMIT_PER_MINUTE: ${LOGIN_RATE_LIMIT_PER_MINUTE:-10}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-demo-api}
+      ALLOW_PRIVATE_HOSTS: ${ALLOW_PRIVATE_HOSTS:-demo-api}
+      ALLOWED_PORTS: ${ALLOWED_PORTS:-80,443,8080}
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      STATUS_TITLE: ${STATUS_TITLE:-Signalpost demo status}
+      NODE_OPTIONS: --max-old-space-size=96
+      # DNS lookups and password hashing share libuv's pool; 4 matches MAX_CONCURRENT_CHECKS.
+      UV_THREADPOOL_SIZE: '4'
+    ports:
+      - '127.0.0.1:8105:3105'
+    volumes:
+      - data:/data
+      - ./backups:/backups
+    tmpfs:
+      - /tmp:size=8m
+    # edge: the only route out (for allowlisted public hosts); targets: the internal demo network.
+    networks: [edge, targets]
+    depends_on:
+      demo-api:
+        condition: service_healthy
+    restart: on-failure:3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 160M
+          pids: 64
+
+  # Stand-in service for the demo monitors. Internal network only: no host port, no internet.
+  demo-api:
+    <<: *hardening
+    image: signalpost:${IMAGE_TAG:-local}
+    command: ['dist/cli.js', 'demo-target']
+    environment:
+      DEMO_CONTROL_TOKEN: ${DEMO_CONTROL_TOKEN:?DEMO_CONTROL_TOKEN must be set in .env}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+    networks: [targets]
+    healthcheck:
+      test:
+        [
+          'CMD',
+          '/nodejs/bin/node',
+          '-e',
+          "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: on-failure:3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
+          pids: 32
+
+  # One-shot tasks share the app image. Not started by `up`.
+  seed:
+    <<: *hardening
+    profiles: [tools]
+    image: signalpost:${IMAGE_TAG:-local}
+    command: ['dist/cli.js', 'seed']
+    environment:
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?SEED_ADMIN_PASSWORD must be set in .env}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-demo-api}
+    volumes:
+      - data:/data
+      - ./backups:/backups
+    network_mode: none
+
+volumes:
+  data:
+
+networks:
+  edge: {}
+  targets:
+    internal: true

@@ -1,0 +1,17 @@
+# Overrides for a future public demo behind a TLS-terminating reverse proxy on the same host.
+# Not used locally. Usage on a server:
+#   IMAGE=ghcr.io/<owner>/signalpost@sha256:... docker compose -f compose.yaml -f compose.prod.yaml up -d
+# See docs/DEPLOYMENT.md. The proxy (not part of this repo) is the only public listener.
+services:
+  app:
+    image: ${IMAGE:?IMAGE must be a pinned registry reference}
+    build: !reset null
+    environment:
+      COOKIE_SECURE: 'true'
+      TRUST_PROXY: 'true'
+    ports: !override
+      - '127.0.0.1:8105:3105'
+  demo-api:
+    image: ${IMAGE:?IMAGE must be a pinned registry reference}
+  seed:
+    image: ${IMAGE:?IMAGE must be a pinned registry reference}
