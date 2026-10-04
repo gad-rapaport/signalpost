@@ -1,0 +1,11 @@
+dist
+node_modules
+package-lock.json
+playwright-report
+test-results
+backups
+data
+docs/screenshots
+docs/media
+animation/out
+public/fonts
