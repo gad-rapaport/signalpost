@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: jobs only read the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch makes older runs pointless.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  quality:
+    name: Lint, types, unit and integration tests, build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      # better-sqlite3 ships prebuilt binaries; no compiler needed.
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:unit
+      # Integration tests serve their targets on the runner's private address: the policy never allows loopback.
+      - run: npm run test:integration
+      - run: npm run build
+
+  stack:
+    name: Docker stack, E2E, failure drill, backup and restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    needs: quality
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Create a throwaway .env
+        run: |
+          gen() { openssl rand -hex 16; }
+          {
+            echo "SEED_ADMIN_PASSWORD=$(gen)"
+            echo "DEMO_CONTROL_TOKEN=$(gen)"
+            echo "ALLOWED_HOSTS=demo-api,example.org"
+            echo "ALLOW_PRIVATE_HOSTS=demo-api"
+            echo "ALLOWED_PORTS=80,443,8080"
+            # E2E signs in more often than a person would; the limiter itself is covered by integration tests.
+            echo "LOGIN_RATE_LIMIT_PER_MINUTE=60"
+          } > .env
+          mkdir -p backups && chmod 777 backups
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: signalpost:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Start stack and seed
+        run: |
+          docker compose up -d --wait
+          docker compose --profile tools run --rm seed
+      - name: Wait for the first checks
+        run: |
+          for i in $(seq 1 30); do
+            status=$(curl -fsS http://127.0.0.1:8105/api/status.json | jq -r .status) || true
+            [ "$status" = "up" ] && exit 0
+            sleep 3
+          done
+          echo "monitors never came up"; exit 1
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --project=desktop --project=mobile
+        env:
+          CI: 'true'
+      - name: Failure drill (outage opens incidents, recovery resolves them)
+        run: |
+          docker compose stop demo-api
+          for i in $(seq 1 40); do
+            n=$(curl -fsS http://127.0.0.1:8105/api/status.json | jq '.openIncidents | length')
+            [ "$n" -ge 3 ] && break
+            sleep 3
+          done
+          [ "$n" -ge 3 ] || { echo "incidents did not open"; exit 1; }
+          echo "Outage detected: $n incidents" >> "$GITHUB_STEP_SUMMARY"
+          docker compose start demo-api
+          for i in $(seq 1 40); do
+            n=$(curl -fsS http://127.0.0.1:8105/api/status.json | jq '.openIncidents | length')
+            [ "$n" -eq 0 ] && break
+            sleep 3
+          done
+          [ "$n" -eq 0 ] || { echo "incidents did not resolve"; exit 1; }
+          echo "Recovered: all incidents resolved" >> "$GITHUB_STEP_SUMMARY"
+      - name: Backup and restore
+        run: |
+          docker compose exec -T app /nodejs/bin/node dist/cli.js backup
+          file=$(ls -t backups/*.db | head -n 1)
+          docker compose stop app
+          docker compose --profile tools run --rm seed dist/cli.js restore "/backups/$(basename "$file")" --yes
+          docker compose start app
+          docker compose up -d --wait
+          curl -fsS http://127.0.0.1:8105/readyz
+      - name: Image size and resource use
+        run: |
+          docker image ls signalpost:local --format '{{.Repository}}:{{.Tag}} {{.Size}}' >> "$GITHUB_STEP_SUMMARY"
+          docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' >> "$GITHUB_STEP_SUMMARY"
+      - name: Vulnerability scan (report)
+        # Report-only: base image findings are fixed by rebuilding on a newer base, see docs/SECURITY.md.
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 \
+            image --severity HIGH,CRITICAL --ignore-unfixed --no-progress signalpost:local | tee trivy.txt
+          { echo '```'; tail -n 40 trivy.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  security:
+    name: Secret and dependency scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Gitleaks (full history)
+        run: docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --redact --no-banner
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
