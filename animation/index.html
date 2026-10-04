@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Signalpost product film</title>
+    <style>
+      @font-face {
+        font-family: 'Barlow';
+        font-weight: 400;
+        src: url('../node_modules/@fontsource/barlow/files/barlow-latin-400-normal.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'Barlow';
+        font-weight: 600;
+        src: url('../node_modules/@fontsource/barlow/files/barlow-latin-600-normal.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'Barlow Semi Condensed';
+        font-weight: 600;
+        src: url('../node_modules/@fontsource/barlow-semi-condensed/files/barlow-semi-condensed-latin-600-normal.woff2')
+          format('woff2');
+      }
+      @font-face {
+        font-family: 'Red Hat Mono';
+        font-weight: 400;
+        src: url('../node_modules/@fontsource/red-hat-mono/files/red-hat-mono-latin-400-normal.woff2') format('woff2');
+      }
+      html,
+      body {
+        margin: 0;
+        background: #111;
+      }
+      svg {
+        display: block;
+        width: 100vw;
+        height: auto;
+        max-height: 100vh;
+        margin: 0 auto;
+        font-family: 'Barlow', sans-serif;
+      }
+      .is-render svg {
+        width: 1920px;
+        height: 1080px;
+        max-height: none;
+      }
+      .head {
+        font-family: 'Barlow Semi Condensed', sans-serif;
+        font-weight: 600;
+      }
+      .mono {
+        font-family: 'Red Hat Mono', monospace;
+      }
+      .player {
+        position: fixed;
+        left: 50%;
+        bottom: 12px;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        background: rgb(0 0 0 / 70%);
+        color: #fff;
+        padding: 8px 12px;
+        border-radius: 10px;
+        font: 14px system-ui;
+      }
+      .player input {
+        width: 360px;
+      }
+    </style>
+  </head>
+  <body>
+    <svg id="stage" viewBox="0 0 1920 1080" role="img" aria-label="Signalpost product film"></svg>
+    <script src="motion.js"></script>
+    <script src="scene.js"></script>
+  </body>
+</html>

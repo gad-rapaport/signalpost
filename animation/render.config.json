@@ -1,0 +1,7 @@
+{
+  "name": "signalpost-film",
+  "root": "..",
+  "posterAt": 10.6,
+  "previewFrom": 12.6,
+  "previewSeconds": 4
+}

@@ -11,6 +11,20 @@ no-redirects rule. A monitor can never be pointed at cloud metadata, localhost o
 **Specialisation shown:** DevOps and network security: SSRF-safe outbound requests, incident automation,
 metrics, health checks, retention, backups, hardened containers and a tested failure drill.
 
+## Product film
+
+[![Play the 21-second Signalpost product film](docs/media/poster.jpg)](https://github.com/gad-rapaport/signalpost/releases/download/v0.1.0/signalpost-film.mp4)
+
+21 seconds, no sound needed: the monitor list unfolds into a live system diagram, a request to the cloud
+metadata address is stopped at the outbound policy, Orders API fails twice and an incident opens, two good
+checks close it, and the status page tells customers the same story.
+[Download or play the MP4](https://github.com/gad-rapaport/signalpost/releases/download/v0.1.0/signalpost-film.mp4)
+(release asset; needs access to this repository while it is private). Made from code in
+[animation/](animation/): [brief](docs/ANIMATION-BRIEF.md), [storyboard](docs/ANIMATION-STORYBOARD.md),
+[rendering](docs/ANIMATION-RENDERING.md).
+
+![Looping preview of the film: failure and recovery on the system diagram](docs/media/preview.webp)
+
 ## What it does
 
 - **Checks** HTTP and HTTPS endpoints (GET or HEAD) on an interval: expected status range, optional keyword in
